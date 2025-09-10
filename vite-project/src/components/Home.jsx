@@ -1,16 +1,42 @@
 import React, { useState, useEffect } from "react";
 import { BarChart2, Play, LogOut } from "lucide-react";
 import ProgressBar from "./ProgressBar";
+import { useApi } from "../hooks/useApi"; // useApiフックをインポート
+import { words } from "../data/words"; // words.jsもインポート
 
 export default function Home({ onStartQuiz, onLogout }) {
     const userInfo = JSON.parse(localStorage.getItem("userInfo")) || {};
     const nickname = userInfo.nickname || "";
 
+    const { callApi, response, error: apiError } = useApi(); // useApiフックを使用
     const [progress, setProgress] = useState(0);
 
     useEffect(() => {
-        const newProgress = Math.floor(Math.random() * 101);
-        setProgress(newProgress);
+        const fetchProgress = async () => {
+            try {
+                const getRes = await callApi(
+                    "/usage-history-service/usage-histories/Ashir_ZAP/correctIds",
+                    {
+                        method: "GET",
+                        useAuth: true,
+                    }
+                );
+                if (apiError || !getRes) {
+                    console.error("Failed to fetch correctIds");
+                    return;
+                }
+                const data = getRes.value;
+                const existingIds = data?.correctIds || [];
+
+                const totalWordsCount = words.length;
+                const progressPercent = Math.floor((existingIds.length / totalWordsCount) * 100);
+                setProgress(progressPercent);
+            } catch (error) {
+                console.error("Error fetching correctIds:", error);
+            }
+        };
+
+        fetchProgress();
     }, []);
 
     return (
@@ -47,12 +73,10 @@ export default function Home({ onStartQuiz, onLogout }) {
             </div>
 
             {/* カスタムCSSを追加 */}
-            <style jsx>{`
+            <style jsx="true">{`
                 .background-layer {
                     position: absolute;
                     inset: 0;
-                    background: linear-gradient(to bottom right, #a8e063, #56ab2f);
-                    border-radius: 0.75rem; /* rounded-xlと同じ半径 */
                     z-index: 0; /* 背景を最背面に */
                 }
             `}</style>
