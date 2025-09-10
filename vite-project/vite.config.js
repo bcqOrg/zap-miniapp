@@ -37,7 +37,7 @@ export default defineConfig({
         }
       },
       '/usage-history-service': {
-        target: 'https://zap-customer-st.benesse.ne.jp',
+        target: 'https://zap-usage-history-st.benesse.ne.jp/',
         changeOrigin: true,
         secure: false,
         configure: (proxy, options) => {
