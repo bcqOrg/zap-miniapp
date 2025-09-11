@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { LogIn } from "lucide-react";
 import { useApi } from "../hooks/useApi";
-import { signingService } from '../utils/signing-service';
+import { signingService } from '../utils/signingService';
 
 export default function Login({ onLoginSuccess }) {
     const [loginId, setLoginId] = useState("");

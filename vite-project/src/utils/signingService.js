@@ -3,7 +3,7 @@
  * セッションベースHMAC-SHA256認証の署名計算と認証ヘッダー生成
  */
 
-import { CryptoService, NonceManager } from 'crypto';
+import { CryptoService, NonceManager } from './crypto';
 
 /**
  * 署名エラークラス
