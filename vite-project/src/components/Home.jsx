@@ -14,6 +14,8 @@ export default function Home({ onStartQuiz, onLogout }) {
     useEffect(() => {
         const fetchProgress = async () => {
             try {
+                console.log("[CorrectIds] GET /usage-history-service/usage-histories/Ashir_ZAP/correctIds");
+                console.log("[CorrectIds] リクエスト -> なし");
                 const getRes = await callApi(
                     "/usage-history-service/usage-histories/Ashir_ZAP/correctIds",
                     {
@@ -21,6 +23,7 @@ export default function Home({ onStartQuiz, onLogout }) {
                         useAuth: true,
                     }
                 );
+                console.log("[CorrectIds] レスポンス -> " + JSON.stringify(getRes));
                 if (apiError || !getRes) {
                     console.error("Failed to fetch correctIds");
                     return;
@@ -40,7 +43,7 @@ export default function Home({ onStartQuiz, onLogout }) {
     }, []);
 
     return (
-        <div className="relative bg-gray-100 p-8 rounded-xl shadow w-96" style={{ overflow: 'visible' }}>
+        <div className="relative bg-gray-100 p-8 rounded-xl shadow w-[400px]" style={{ overflow: 'visible' }}>
             {/* 背景をカスタムCSSクラスで設定 */}
             <div className="background-layer" />
 
