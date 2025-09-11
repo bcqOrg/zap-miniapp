@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { words } from "../data/words"; // 全問題データ
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useApi } from "../hooks/useApi"; // API呼び出し用フック
@@ -6,11 +6,15 @@ import { useApi } from "../hooks/useApi"; // API呼び出し用フック
 export default function Quiz({ onFinish }) {
     const { callApi, response, error: apiError } = useApi();
 
-    const [correctIds, setCorrectIds] = useState([]);
+    // const [correctIds, setCorrectIds] = useState([]);
     const [step, setStep] = useState(0);
     const [result, setResult] = useState(null);
     const [selected, setSelected] = useState(null);
-    const [sessionCorrectIds, setSessionCorrectIds] = useState([]);
+    // const [sessionCorrectIds, setSessionCorrectIds] = useState([]);
+
+    // correctIdsとsessionCorrectIdsをuseRefで管理
+    const correctIdsRef = useRef([]);
+    const sessionCorrectIdsRef = useRef([]);
 
     const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -18,20 +22,43 @@ export default function Quiz({ onFinish }) {
     useEffect(() => {
         const fetchCorrectIds = async () => {
             try {
+                console.log("[CorrectIds] GET /usage-history-service/usage-histories/Ashir_ZAP/correctIds");
+                console.log("[CorrectIds] リクエスト -> なし");
                 const getRes = await callApi(
                     "/usage-history-service/usage-histories/Ashir_ZAP/correctIds",
                     { method: "GET", useAuth: true }
                 );
+                console.log("[CorrectIds] レスポンス -> " + JSON.stringify(getRes));
+                if (apiError) {
+                    // 404 Not Found の場合のみ新規作成
+                    console.log("aaa"); // これがでないのに
+                    // console.warn("正解IDデータが存在しないため新規作成します");
+                    // const dataNew = await callApi(
+                    //     "/usage-history-service/usage-histories/Ashir_ZAP/correctIds",
+                    //     { method: "POST", body: { value: { correctIds: [] } }, useAuth: true }
+                    // );
+                    // console.log("[CorrectIds] 新規作成 -> " + JSON.stringify(dataNew));
+                    // return;
+                }
                 if (apiError || !getRes) {
-                    console.error("正解IDの取得に失敗");
+                    console.error("正解IDの取得に失敗" + apiError); // これがでる、これもuseStateでエラーを保存しているせい？
+                    // TODO 404 Not Found の場合のみ新規作成
+                    console.warn("正解IDデータが存在しないため新規作成します");
+                    const dataNew = await callApi(
+                        "/usage-history-service/usage-histories/Ashir_ZAP/correctIds",
+                        { method: "POST", body: { value: { correctIds: [] } }, useAuth: true }
+                    );
+                    console.log("[CorrectIds] 新規作成 -> " + JSON.stringify(dataNew));
                     return;
                 }
                 const ids = getRes.value?.correctIds || [];
-                setCorrectIds(ids);
-                await wait(300);
-                console.log("APIから取得した正解ID配列:", correctIds);
+                // setCorrectIds(ids);
+                correctIdsRef.current = ids; // correctIdsを更新
+                await wait(500);
+                console.log("APIから取得した正解ID配列:", correctIdsRef.current);
             } catch (error) {
                 console.error("正解ID取得エラー:", error);
+
             }
         };
         fetchCorrectIds();
@@ -39,12 +66,12 @@ export default function Quiz({ onFinish }) {
 
     // 出題問題の配列（correctIdsを除外しID昇順にソート）
     const quizWords = useMemo(() => {
-        const remainingWords = words.filter(w => !correctIds.includes(w.id));
+        const remainingWords = words.filter(w => !correctIdsRef.current.includes(w.id));
         remainingWords.sort((a, b) => a.id - b.id);
         const selectedQuestions = remainingWords.slice(0, 5);
         console.log("出題問題の配列:", selectedQuestions);
         return selectedQuestions;
-    }, [correctIds]);
+    }, [correctIdsRef.current]);
 
     const current = quizWords[step];
 
@@ -68,17 +95,33 @@ export default function Quiz({ onFinish }) {
         );
     };
 
+    // APIに正解IDを送信
     const sendCorrectIds = async (ids) => {
         const existingIds = await fetchCorrectIdsFromApi();
         const newIds = [...existingIds, ...ids];
-        // 配列内を昇順にソート
         newIds.sort((a, b) => a - b);
-
         await updateCorrectIdsApi(newIds);
-        setCorrectIds(newIds);
-        await wait(300);
-        console.log("correctIds更新:", correctIds);
+        correctIdsRef.current = newIds; // 更新
+        await wait(500);
         onFinish();
+    };
+
+    // sessionCorrectIdsにIDを追加
+    const addSessionCorrectId = (id) => {
+        sessionCorrectIdsRef.current = [...sessionCorrectIdsRef.current, id];
+    };
+
+    // 例：正解したときに呼び出す
+    const handleCorrect = () => {
+        if (current) {
+            addSessionCorrectId(current.id);
+        }
+    };
+
+    // 最後にsessionCorrectIdsを使いたい場合
+    const handleFinish = () => {
+        console.log("今回正解したID:", sessionCorrectIdsRef.current);
+        sendCorrectIds(sessionCorrectIdsRef.current);
     };
 
     const handleSelect = async (idx) => {
@@ -86,12 +129,13 @@ export default function Quiz({ onFinish }) {
         if (idx === current.answer) {
             console.log("正解:", current.id);
             setResult("correct");
-            setSessionCorrectIds((ids) => [...ids, current.id]);
-            await wait(100);
+            // setSessionCorrectIds((ids) => [...ids, current.id]);
+            // await wait(100);
+            handleCorrect();
         } else {
             console.log("不正解:", current.id);
             setResult("wrong");
-            await wait(100);
+            // await wait(100);
         }
 
         setSelected(idx);
@@ -100,8 +144,9 @@ export default function Quiz({ onFinish }) {
                 setStep((s) => s + 1);
             } else {
                 // 最後の問題終了
-                console.log("今回正解したID:", sessionCorrectIds);
-                sendCorrectIds(sessionCorrectIds);
+                // console.log("今回正解したID:", sessionCorrectIds);
+                // sendCorrectIds(sessionCorrectIds);
+                handleFinish();
             }
             setSelected(null);
             setResult(null);
