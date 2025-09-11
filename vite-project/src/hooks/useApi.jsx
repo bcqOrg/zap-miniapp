@@ -1,28 +1,14 @@
 import { useState } from 'react';
-import { signingService } from '../utils/signing-service';
+import { signingService } from '../utils/signingService';
 
-type UseApiOptions = {
-    useAuth?: boolean; // 認証ヘッダを付与するかどうか
-};
-
-/**
- * API呼び出し用のカスタムフック
- */
 export const useApi = () => {
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<Error | null>(null);
-    const [response, setResponse] = useState<any>(null);
+    const [error, setError] = useState(null);
+    const [response, setResponse] = useState(null);
 
-    /**
-     * APIを呼び出す関数
-     */
     const callApi = async (
-        url: string,
-        options: {
-            method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-            body?: any;
-            useAuth?: boolean;
-        } = {}
+        url,
+        options = {}
     ) => {
         const {
             method = 'GET',
@@ -34,10 +20,10 @@ export const useApi = () => {
         setError(null);
 
         try {
-            const headers: Record<string, string> = {
+            const headers = {
                 'Content-Type': 'application/json',
             };
-            console.log('useAuth: ' + useAuth); // これはログ出力される
+            console.log('useAuth: ' + useAuth);
 
             if (useAuth) {
                 const path = url; // プロキシ使用時は相対パスをそのまま使用
@@ -59,19 +45,15 @@ export const useApi = () => {
             }
 
             const data = await res.json();
-            // console.log('data: ' + data)
-            setResponse(data); // これだと非同期で１回のボタン押下ではできない
-            // await new Promise(resolve => setTimeout(resolve, 500));
-            return data; // 返す
+            setResponse(data); // 処理が遅いので値が入らないことも、（例）1回目のログインができない
+            return data;
         } catch (err) {
             console.error('Error in callApi:', err);
-            setError(err as Error);
+            setError(err);
         } finally {
             setLoading(false);
         }
     };
-
-    // console.log('response: ' + response)
 
     return {
         response,
