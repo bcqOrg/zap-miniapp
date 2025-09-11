@@ -1,32 +1,32 @@
 import React, { useState, useEffect } from "react";
 import { UserPlus, LogOut } from "lucide-react";
+import { useApi } from "../hooks/useApi";
 
 export default function HNSetup({ onSetup, onLogout }) {
     const [nickname, setNickname] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
+    const [alert, setAlert] = useState({ type: "", message: "" });
+    const { response, error: apiError, loading, callApi } = useApi();
 
     // ニックネーム取得API
     useEffect(() => {
         const fetchNickname = async () => {
             try {
-                const res = await fetch("/customer-service/member-info/nickname", {
+                console.log("[Nickname] GET /customer-service/member-info/nickname");
+                console.log("[Nickname] リクエスト -> なし");
+                const dataNick = await callApi("/customer-service/member-info/nickname", {
                     method: "GET",
-                    // credentials: "include", // 必要に応じて
+                    useAuth: true,
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.nickname) {
-                        setNickname(data.nickname);
-                        // ローカルストレージにも保存
-                        const userInfo = JSON.parse(localStorage.getItem("userInfo")) || {};
-                        userInfo.nickname = data.nickname;
-                        localStorage.setItem("userInfo", JSON.stringify(userInfo));
-                        onSetup();
-                    }
+                console.log("[Nickname] レスポンス -> " + JSON.stringify(dataNick));
+                if (!apiError && dataNick) {
+                    setNickname(dataNick.nickname);
+                    userInfo.nickname = dataNick.nickname || null;
+                    localStorage.setItem("userInfo", JSON.stringify(userInfo));
+                    onSetup();
                 }
             } catch (e) {
                 // ニックネーム未設定時は何もしない
+                console.log("[Nickname] ニックネーム未設定")
             }
         };
         fetchNickname();
@@ -36,37 +36,45 @@ export default function HNSetup({ onSetup, onLogout }) {
     const handleRegister = async (e) => {
         e.preventDefault();
         if (!nickname) return setError("ニックネームを入力してください");
-        setLoading(true);
-        setError("");
         try {
-            const res = await fetch("/customer-service/member-info/nickname", {
+            console.log("[Nickname] POST /customer-service/member-info/nickname");
+            console.log("[Nickname] リクエスト -> " + JSON.stringify({
+                appId: "Ashir_ZAP",
+                nickname,
+            }));
+            const dataNick = await callApi("/customer-service/member-info/nickname", {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+                body: {
                     appId: "Ashir_ZAP",
                     nickname,
-                }),
-                // credentials: "include", // 必要に応じて
+                },
+                useAuth: true,
             });
-            if (res.ok) {
-                // ローカルストレージにも保存
-                const userInfo = JSON.parse(localStorage.getItem("userInfo")) || {};
-                userInfo.nickname = nickname;
+            console.log("[Nickname] レスポンス -> " + JSON.stringify(dataNick));
+            if (!apiError && dataNick) {
+                setNickname(dataNick.nickname);
+                userInfo.nickname = dataNick.nickname || null;
                 localStorage.setItem("userInfo", JSON.stringify(userInfo));
                 onSetup();
             } else {
-                setError("登録に失敗しました");
+                setAlert({ type: "error", message: "🚫登録に失敗しました" });
             }
         } catch (e) {
-            setError("通信エラーが発生しました");
-        } finally {
-            setLoading(false);
+            console.error(e);
+            setAlert({ type: "error", message: "🚫通信に失敗しました" });
         }
+    };
+
+    // Tailwind Alerts風スタイル
+    const alertStyle = {
+        info: "bg-blue-50 border border-blue-400 text-blue-700",
+        success: "bg-green-50 border border-green-400 text-green-700",
+        error: "bg-red-50 border border-red-400 text-red-700",
     };
 
     return (
         <form
-            className="flex flex-col items-center bg-white p-8 rounded-xl shadow w-96"
+            className="flex flex-col items-center bg-white p-8 rounded-xl shadow w-[400px]"
             onSubmit={handleRegister}
         >
             <h2 className="text-2xl font-bold mb-8 text-[#28600E]">ニックネーム設定</h2>
@@ -78,14 +86,13 @@ export default function HNSetup({ onSetup, onLogout }) {
                 required
             />
             <button
-                className="flex items-center justify-center bg-[#7D784A] text-white py-3 w-full rounded-[14px] transition-transform hover:scale-105"
+                className="flex items-center justify-center bg-[#28600E] text-white py-3 w-full rounded-[14px] transition-transform hover:scale-105"
                 type="submit"
                 disabled={loading}
             >
                 <UserPlus className="mr-2" size={18} />
                 登録
             </button>
-            {error && <div className="mt-4 text-red-500">{error}</div>}
             <button
                 className="flex items-center justify-center bg-[#7D784A] text-white py-3 w-full rounded-[14px] mt-4 transition-transform hover:scale-105"
                 onClick={onLogout}
@@ -93,6 +100,15 @@ export default function HNSetup({ onSetup, onLogout }) {
                 <LogOut className="mr-2" size={18} />
                 ログアウト
             </button>
+            {/* アラートエリア */}
+            {alert.message && (
+                <div
+                    className={`mt-6 px-4 py-3 rounded-lg w-full text-sm font-medium ${alertStyle[alert.type]}`}
+                    role="alert"
+                >
+                    {alert.message}
+                </div>
+            )}
         </form>
     );
 }
