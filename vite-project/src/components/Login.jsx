@@ -16,6 +16,11 @@ export default function Login({ onLoginSuccess }) {
         try {
             // 1. ログインAPI
             console.log("[Login] POST /customer-service/auth/login");
+            console.log("[Login] リクエスト -> " + JSON.stringify({
+                authGroup: "ZM-PLUS",
+                loginId,
+                //password, 出力しない
+            }));
             const dataLogin = await callApi("/customer-service/auth/login", {
                 method: "POST",
                 body: {
@@ -25,12 +30,14 @@ export default function Login({ onLoginSuccess }) {
                 },
                 useAuth: false,
             });
+            console.log("[Login] レスポンス -> " + JSON.stringify(dataLogin));
 
             if (apiError || !dataLogin || dataLogin.loginStatus !== "OK") {
                 console.log("[Login] 認証失敗 -> " + apiError);
                 setAlert({ type: "error", message: "🚫ログイン失敗（ID・パスワードをご確認ください。）" });
                 return;
             }
+            console.log("[Login] 認証成功");
 
             // クッキー保存の待機
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -65,10 +72,13 @@ export default function Login({ onLoginSuccess }) {
             localStorage.setItem("userInfo", JSON.stringify(userInfo));
 
             // 2. ニックネーム取得API
+            console.log("[Nickname] GET /customer-service/member-info/nickname");
+            console.log("[Nickname] リクエスト -> なし");
             const dataNick = await callApi("/customer-service/member-info/nickname", {
                 method: "GET",
                 useAuth: true,
             });
+            console.log("[Nickname] レスポンス -> " + JSON.stringify(dataNick));
             if (!apiError && dataNick) {
                 userInfo.nickname = dataNick.nickname || null;
                 localStorage.setItem("userInfo", JSON.stringify(userInfo));
