@@ -1,7 +1,7 @@
 # language: ja
 Feature: ログイン
     会員IDとパスワードを入力して、ログイン
-    ログインAPI(GET "customer-service/auth/login")を利用
+    ログインAPI(POST "customer-service/auth/login")を利用
 
     Background:
         Given API用のプロキシ設定がされている
@@ -16,7 +16,7 @@ Feature: ログイン
     Scenario: 1-1. 正常系 - ニックネーム登録前のログイン成功
         Given member_profileにニックネーム登録がされていない:
             | ZAP_MEMBER_ID | PRODUCT_LINE_CODE | NICKNAME | ACCOUNT_TYPE | CREATED_BY | CREATED_AT             | UPDATED_BY | UPDATED_AT              | DELETE_FLAG |
-            | 50            | 2013              | <<NULL>> | paid         | admin      | 2025/07/08 5:00:22.037 | 50         | 2025/09/11 11:40:39.772 | False       |
+            | 50            | 2013              | null     | paid         | admin      | 2025/07/08 5:00:22.037 | 50         | 2025/09/11 11:40:39.772 | False       |
         When 会員IDに "6747572484" を入力
         And  パスワードに "hbst1234" を入力
         And  ログインボタンを押下
