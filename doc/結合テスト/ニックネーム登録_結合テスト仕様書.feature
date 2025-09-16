@@ -17,7 +17,7 @@ Feature: ニックネーム登録
     Scenario: 1-1. ニックネーム登録成功
         When ユーザがニックネームに "たろう" を入力
         And 登録ボタンを押下
-        And member_profileにニックネームが登録される:
+        Then member_profileにニックネームが登録される:
             | ZAP_MEMBER_ID | PRODUCT_LINE_CODE | NICKNAME | ACCOUNT_TYPE | CREATED_BY | CREATED_AT             | UPDATED_BY | UPDATED_AT              | DELETE_FLAG |
             | 50            | 2013              | "たろう" | paid         | admin      | 2025/07/08 5:00:22.037 | 50         | 2025/09/11 11:40:39.772 | False       |
 
