@@ -1,0 +1,141 @@
+name: IT Label Approval Required for main
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+jobs:
+  check-approval:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref == 'main'
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check IT label and approval requirement
+        id: check_protection
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              
+              // Check if PR has IT label
+              const labels = pr.labels.map(label => label.name);
+              const hasITLabel = labels.some(label => label === 'IT');
+              
+              console.log(`PR labels: ${labels.join(', ')}`);
+              console.log(`Has IT label: ${hasITLabel}`);
+              
+              // If no IT label, skip the check
+              if (!hasITLabel) {
+                console.log('IT label not found. Skipping approval check.');
+                core.setOutput('skip', 'true');
+                core.setOutput('status', 'skipped');
+                core.setOutput('headSha', pr.head.sha);
+                return;
+              }
+              
+              // Get PR reviews
+              const { data: reviews } = await github.rest.pulls.listReviews({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              
+              // Get latest review state for each user (exclude dismissed reviews)
+              const latestReviewsByUser = new Map();
+              reviews.forEach(review => {
+                // Skip dismissed reviews
+                if (review.state === 'DISMISSED') {
+                  return;
+                }
+                const user = review.user.login;
+                const existing = latestReviewsByUser.get(user);
+                if (!existing || new Date(review.submitted_at) > new Date(existing.submitted_at)) {
+                  latestReviewsByUser.set(user, review);
+                }
+              });
+              
+              // Filter approved reviews only
+              const approvedReviews = Array.from(latestReviewsByUser.values())
+                .filter(review => review.state === 'APPROVED');
+              
+              const approvers = approvedReviews.map(r => r.user.login);
+              const approvalCount = approvers.length;
+              const hasApproval = approvalCount >= 1;
+              
+              console.log(`Approval count: ${approvalCount}`);
+              console.log(`Approvers: ${approvers.join(', ') || 'None'}`);
+              
+              core.setOutput('skip', 'false');
+              core.setOutput('hasApproval', hasApproval.toString());
+              core.setOutput('approvalCount', approvalCount.toString());
+              core.setOutput('approvers', JSON.stringify(approvers));
+              core.setOutput('headSha', pr.head.sha);
+              core.setOutput('status', hasApproval ? 'success' : 'failure');
+              
+            } catch (error) {
+              console.error('Error checking approval:', error);
+              core.setFailed(`Failed to check approval: ${error.message}`);
+              throw error;
+            }
+
+      - name: Create check status
+        if: steps.check_protection.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            try {
+              const status = '${{ steps.check_protection.outputs.status }}';
+              const approvalCount = '${{ steps.check_protection.outputs.approvalCount }}';
+              const approversJson = '${{ steps.check_protection.outputs.approvers }}';
+              const headSha = '${{ steps.check_protection.outputs.headSha }}';
+              
+              // Safely parse approvers from JSON
+              let approvers = [];
+              try {
+                approvers = JSON.parse(approversJson);
+              } catch (e) {
+                console.warn('Failed to parse approvers as JSON, using fallback:', e.message);
+                approvers = approversJson ? approversJson.split(', ') : [];
+              }
+              
+              const conclusion = status === 'success' ? 'success' : 'failure';
+              const summary = status === 'success' 
+                ? `✅ Approval check passed: ${approvalCount} approval(s) found.\nApprovers: ${approvers.join(', ') || 'None'}`
+                : `❌ Approval check failed: At least 1 approval is required for PRs with IT label targeting main.\nCurrent approval count: ${approvalCount}`;
+              
+              await github.rest.checks.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'IT Label Approval Check',
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: conclusion,
+                output: {
+                  title: 'IT Label Approval Check',
+                  summary: summary
+                }
+              });
+              
+              // Fail the job if approval is missing
+              if (status === 'failure') {
+                core.setFailed('At least 1 approval is required for PRs with IT label targeting main.');
+              }
+            } catch (error) {
+              console.error('Error creating check status:', error);
+              core.setFailed(`Failed to create check status: ${error.message}`);
+              throw error;
+            }
+
