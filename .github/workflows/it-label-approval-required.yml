@@ -27,6 +27,21 @@ jobs:
             const REQUIRED_APPROVAL_COUNT = 1;
             const IT_LABEL = 'IT';
             
+            // Get PR number from context
+            function getPRNumber() {
+              // For pull_request events
+              if (context.payload.pull_request) {
+                return context.payload.pull_request.number;
+              }
+              // For pull_request_review events
+              if (context.payload.review && context.payload.review.pull_request_url) {
+                const match = context.payload.review.pull_request_url.match(/\/pulls\/(\d+)$/);
+                if (match) return parseInt(match[1]);
+              }
+              // Fallback to issue number (works for pull_request events)
+              return context.issue.number;
+            }
+            
             // Get latest review for each user (excluding dismissed reviews)
             function getLatestReviewsByUser(reviews) {
               const latestByUser = new Map();
@@ -50,10 +65,19 @@ jobs:
             }
             
             try {
+              const prNumber = getPRNumber();
+              console.log(`Event: ${context.eventName}, Action: ${context.payload.action}`);
+              console.log(`PR Number: ${prNumber}`);
+              
+              if (!prNumber) {
+                core.setFailed('Could not determine PR number from context');
+                return;
+              }
+              
               const { data: pr } = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number,
+                pull_number: prNumber,
               });
               
               const labels = pr.labels.map(label => label.name);
@@ -61,6 +85,7 @@ jobs:
               
               console.log(`PR labels: ${labels.join(', ')}`);
               console.log(`Has IT label: ${hasITLabel}`);
+              console.log(`Head SHA: ${pr.head.sha}`);
               
               // If no IT label, skip approval check
               if (!hasITLabel) {
@@ -75,7 +100,7 @@ jobs:
               const { data: reviews } = await github.rest.pulls.listReviews({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number,
+                pull_number: prNumber,
               });
               
               const latestReviewsByUser = getLatestReviewsByUser(reviews);
@@ -94,6 +119,7 @@ jobs:
               
             } catch (error) {
               console.error('Error checking approval:', error);
+              console.error('Context payload:', JSON.stringify(context.payload, null, 2));
               core.setFailed(`Failed to check approval: ${error.message}`);
               throw error;
             }
@@ -178,28 +204,46 @@ jobs:
               const approversJson = '${{ steps.check_protection.outputs.approvers }}';
               const headSha = '${{ steps.check_protection.outputs.headSha }}';
               
+              console.log('=== Check Status Creation ===');
+              console.log(`Event: ${context.eventName}, Action: ${context.payload.action}`);
               console.log(`skip: ${skip}, status: ${status}, headSha: ${headSha}`);
+              console.log(`approvalCount: ${approvalCount}, approvers: ${approversJson}`);
+              
+              if (!headSha) {
+                core.setFailed('headSha is not set. Previous step may have failed.');
+                return;
+              }
               
               const repo = context.repo;
               const approvers = parseApprovers(approversJson);
               const conclusion = skip === 'true' ? 'skipped' : (status === 'success' ? 'success' : 'failure');
               const summary = getSummary(skip, status, approvalCount, approvers);
               
+              console.log(`Conclusion: ${conclusion}`);
+              console.log(`Summary: ${summary}`);
+              
               // Cancel existing check if exists
               const existingCheck = await findExistingCheck(repo, headSha);
               if (existingCheck) {
+                console.log(`Found existing check with ID: ${existingCheck.id}`);
                 await cancelCheck(repo, existingCheck.id);
+              } else {
+                console.log('No existing check found');
               }
               
               // Create new check
               await createCheck(repo, headSha, conclusion, summary);
+              console.log('Check created successfully');
               
               // Fail the job if approval is missing
               if (status === 'failure') {
                 core.setFailed('At least 1 approval is required for PRs with IT label targeting main.');
               }
             } catch (error) {
-              console.error('Error creating check status:', error);
+              console.error('=== Error creating check status ===');
+              console.error('Error:', error);
+              console.error('Error message:', error.message);
+              console.error('Error stack:', error.stack);
               core.setFailed(`Failed to create check status: ${error.message}`);
               throw error;
             }
