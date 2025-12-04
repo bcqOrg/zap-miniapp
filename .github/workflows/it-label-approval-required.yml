@@ -160,33 +160,64 @@ jobs:
               return `❌ Approval check failed: At least 1 approval is required for PRs with IT label targeting main.\nCurrent approval count: ${approvalCount}`;
             }
             
-            // Find existing check
-            async function findExistingCheck(repo, headSha) {
-              const { data: existingChecks } = await github.rest.checks.listForRef({
+            // Find all existing checks with the same name across all PR commits
+            async function findAllExistingChecks(repo, prNumber) {
+              // Get PR to find head SHA
+              const { data: pr } = await github.rest.pulls.get({
                 owner: repo.owner,
                 repo: repo.repo,
-                ref: headSha,
+                pull_number: prNumber,
               });
               
-              return existingChecks.check_runs.find(
-                check => check.name === CHECK_NAME && check.head_sha === headSha
+              // Check both head SHA and merge commit SHA (context.sha)
+              const shasToCheck = [pr.head.sha, context.sha].filter(Boolean);
+              const allChecks = [];
+              
+              for (const sha of shasToCheck) {
+                try {
+                  const { data: checks } = await github.rest.checks.listForRef({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    ref: sha,
+                  });
+                  
+                  const matchingChecks = checks.check_runs.filter(
+                    check => check.name === CHECK_NAME
+                  );
+                  allChecks.push(...matchingChecks);
+                } catch (error) {
+                  console.warn(`Failed to list checks for SHA ${sha}: ${error.message}`);
+                }
+              }
+              
+              // Remove duplicates by check ID
+              const uniqueChecks = Array.from(
+                new Map(allChecks.map(check => [check.id, check])).values()
               );
+              
+              return uniqueChecks;
             }
             
-            // Cancel existing check
-            async function cancelCheck(repo, checkId) {
-              await github.rest.checks.update({
-                owner: repo.owner,
-                repo: repo.repo,
-                check_run_id: checkId,
-                status: 'completed',
-                conclusion: 'cancelled',
-                output: {
-                  title: CHECK_NAME,
-                  summary: 'Cancelled and recreated'
+            // Cancel existing checks
+            async function cancelChecks(repo, checks) {
+              for (const check of checks) {
+                try {
+                  await github.rest.checks.update({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    check_run_id: check.id,
+                    status: 'completed',
+                    conclusion: 'cancelled',
+                    output: {
+                      title: CHECK_NAME,
+                      summary: 'Cancelled and recreated'
+                    }
+                  });
+                  console.log(`Cancelled existing check: ${CHECK_NAME} (ID: ${check.id}, SHA: ${check.head_sha})`);
+                } catch (error) {
+                  console.warn(`Failed to cancel check ${check.id}: ${error.message}`);
                 }
-              });
-              console.log(`Cancelled existing check: ${CHECK_NAME}`);
+              }
             }
             
             // Create new check
@@ -203,20 +234,39 @@ jobs:
               console.log(`Created new check: ${CHECK_NAME}`);
             }
             
+            // Get PR number from context
+            function getPRNumber() {
+              if (context.payload.pull_request) {
+                return context.payload.pull_request.number;
+              }
+              if (context.payload.review && context.payload.review.pull_request_url) {
+                const match = context.payload.review.pull_request_url.match(/\/pulls\/(\d+)$/);
+                if (match) return parseInt(match[1]);
+              }
+              return context.issue.number;
+            }
+            
             try {
               const skip = '${{ steps.check_protection.outputs.skip }}';
               const status = '${{ steps.check_protection.outputs.status }}';
               const approvalCount = '${{ steps.check_protection.outputs.approvalCount }}';
               const approversJson = '${{ steps.check_protection.outputs.approvers }}';
               const headSha = '${{ steps.check_protection.outputs.headSha }}';
+              const prNumber = getPRNumber();
               
               console.log('=== Check Status Creation ===');
               console.log(`Event: ${context.eventName}, Action: ${context.payload.action}`);
+              console.log(`PR Number: ${prNumber}`);
               console.log(`skip: ${skip}, status: ${status}, headSha: ${headSha}`);
               console.log(`approvalCount: ${approvalCount}, approvers: ${approversJson}`);
               
               if (!headSha) {
                 core.setFailed('headSha is not set. Previous step may have failed.');
+                return;
+              }
+              
+              if (!prNumber) {
+                core.setFailed('PR number is not set.');
                 return;
               }
               
@@ -228,13 +278,13 @@ jobs:
               console.log(`Conclusion: ${conclusion}`);
               console.log(`Summary: ${summary}`);
               
-              // Cancel existing check if exists
-              const existingCheck = await findExistingCheck(repo, headSha);
-              if (existingCheck) {
-                console.log(`Found existing check with ID: ${existingCheck.id}`);
-                await cancelCheck(repo, existingCheck.id);
+              // Find and cancel all existing checks with the same name
+              const existingChecks = await findAllExistingChecks(repo, prNumber);
+              if (existingChecks.length > 0) {
+                console.log(`Found ${existingChecks.length} existing check(s) to cancel`);
+                await cancelChecks(repo, existingChecks);
               } else {
-                console.log('No existing check found');
+                console.log('No existing checks found');
               }
               
               // Create new check
