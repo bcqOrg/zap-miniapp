@@ -60,6 +60,14 @@ jobs:
             try {
               const prNumber = getPRNumber();
               if (!prNumber) {
+                // workflow_dispatch の場合、PR コンテキストがないためスキップ
+                if (context.eventName === 'workflow_dispatch') {
+                  core.setOutput('skip', 'true');
+                  core.setOutput('status', 'skipped');
+                  core.setOutput('headSha', context.sha);
+                  console.log('workflow_dispatch event: PR context not available, skipping check');
+                  return;
+                }
                 core.setFailed('Could not determine PR number from context');
                 return;
               }
@@ -75,6 +83,10 @@ jobs:
               const commitSha = context.sha; // Merge commit SHA for PR events
               
               console.log(`PR #${prNumber}: labels=[${labels.join(', ')}], hasITLabel=${hasITLabel}, commitSha=${commitSha}`);
+              
+              // PR 情報を次のステップで再利用するために出力
+              core.setOutput('prNumber', prNumber.toString());
+              core.setOutput('prHeadSha', pr.head.sha);
               
               if (!hasITLabel) {
                 core.setOutput('skip', 'true');
@@ -115,17 +127,6 @@ jobs:
           script: |
             const CHECK_NAME = 'IT Label Approval Check';
             
-            function getPRNumber() {
-              if (context.payload.pull_request) {
-                return context.payload.pull_request.number;
-              }
-              if (context.payload.review?.pull_request_url) {
-                const match = context.payload.review.pull_request_url.match(/\/pulls\/(\d+)$/);
-                if (match) return parseInt(match[1]);
-              }
-              return context.issue.number;
-            }
-            
             function parseApprovers(approversJson) {
               try {
                 return JSON.parse(approversJson);
@@ -146,25 +147,50 @@ jobs:
             }
             
             async function findAllExistingChecks(repo, prNumber) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner: repo.owner,
-                repo: repo.repo,
-                pull_number: prNumber,
-              });
-              
-              const shasToCheck = [pr.head.sha, context.sha].filter(Boolean);
+              // PRのすべてのコミットSHAを取得して、すべての既存チェックを探す
               const allChecks = [];
               
-              for (const sha of shasToCheck) {
+              try {
+                // PRのコミット一覧を取得
+                const { data: commits } = await github.rest.pulls.listCommits({
+                  owner: repo.owner,
+                  repo: repo.repo,
+                  pull_number: prNumber,
+                });
+                
+                // すべてのコミットSHAを収集
+                const shasToCheck = commits.map(commit => commit.sha);
+                
+                // 各SHAに対してチェックを検索
+                for (const sha of shasToCheck) {
+                  try {
+                    const { data: checks } = await github.rest.checks.listForRef({
+                      owner: repo.owner,
+                      repo: repo.repo,
+                      ref: sha,
+                    });
+                    allChecks.push(...checks.check_runs.filter(check => check.name === CHECK_NAME));
+                  } catch (error) {
+                    console.warn(`Failed to list checks for SHA ${sha}: ${error.message}`);
+                  }
+                }
+              } catch (error) {
+                console.warn(`Failed to list PR commits: ${error.message}`);
+                // フォールバック: PR情報から直接head SHAを取得
                 try {
+                  const { data: pr } = await github.rest.pulls.get({
+                    owner: repo.owner,
+                    repo: repo.repo,
+                    pull_number: prNumber,
+                  });
                   const { data: checks } = await github.rest.checks.listForRef({
                     owner: repo.owner,
                     repo: repo.repo,
-                    ref: sha,
+                    ref: pr.head.sha,
                   });
                   allChecks.push(...checks.check_runs.filter(check => check.name === CHECK_NAME));
-                } catch (error) {
-                  console.warn(`Failed to list checks for SHA ${sha}: ${error.message}`);
+                } catch (fallbackError) {
+                  console.warn(`Fallback check search failed: ${fallbackError.message}`);
                 }
               }
               
@@ -183,7 +209,7 @@ jobs:
                     conclusion: 'cancelled',
                     output: { title: CHECK_NAME, summary: 'Cancelled and recreated' }
                   });
-                  console.log(`Cancelled check: ${CHECK_NAME} (ID: ${check.id})`);
+                  console.log(`Cancelled check: ${CHECK_NAME} (ID: ${check.id}, SHA: ${check.head_sha})`);
                 } catch (error) {
                   console.warn(`Failed to cancel check ${check.id}: ${error.message}`);
                 }
@@ -200,7 +226,7 @@ jobs:
                 conclusion: conclusion,
                 output: { title: CHECK_NAME, summary: summary }
               });
-              console.log(`Created check: ${CHECK_NAME} (${conclusion})`);
+              console.log(`Created check: ${CHECK_NAME} (${conclusion}) on SHA: ${headSha}`);
             }
             
             try {
@@ -209,26 +235,50 @@ jobs:
               const approvalCount = '${{ steps.check_protection.outputs.approvalCount }}';
               const approversJson = '${{ steps.check_protection.outputs.approvers }}';
               const headSha = '${{ steps.check_protection.outputs.headSha }}';
-              const prNumber = getPRNumber();
+              const prNumber = '${{ steps.check_protection.outputs.prNumber }}';
+              const prHeadSha = '${{ steps.check_protection.outputs.prHeadSha }}';
               
-              if (!headSha || !prNumber) {
-                core.setFailed(`Missing required data: headSha=${headSha}, prNumber=${prNumber}`);
+              // Skip if workflow_dispatch and no PR context
+              if (skip === 'true' && !prNumber) {
+                console.log('Skipping check creation: no PR context available');
+                return;
+              }
+              
+              if (!headSha) {
+                core.setFailed(`Missing required data: headSha is empty`);
+                return;
+              }
+              
+              // If no PR number, we can't find existing checks, but we can still create the check
+              if (!prNumber) {
+                console.warn('PR number not available, skipping existing check cancellation');
+                const repo = context.repo;
+                const approvers = parseApprovers(approversJson || '[]');
+                const conclusion = skip === 'true' ? 'skipped' : (status === 'success' ? 'success' : 'failure');
+                const summary = getSummary(skip, status, approvalCount || '0', approvers);
+                await createCheck(repo, headSha, conclusion, summary);
+                
+                if (status === 'failure') {
+                  core.setFailed('At least 1 approval is required for PRs with IT label targeting main.');
+                }
                 return;
               }
               
               const repo = context.repo;
-              const approvers = parseApprovers(approversJson);
+              const approvers = parseApprovers(approversJson || '[]');
               const conclusion = skip === 'true' ? 'skipped' : (status === 'success' ? 'success' : 'failure');
-              const summary = getSummary(skip, status, approvalCount, approvers);
+              const summary = getSummary(skip, status, approvalCount || '0', approvers);
               
-              // Cancel all existing checks with the same name
-              const existingChecks = await findAllExistingChecks(repo, prNumber);
+              // PRのすべてのコミットに関連する既存チェックを探してキャンセル
+              // これにより、pull_requestとpull_request_reviewの両方で実行された場合でも
+              // 古いチェックが適切にキャンセルされる
+              const existingChecks = await findAllExistingChecks(repo, parseInt(prNumber));
               if (existingChecks.length > 0) {
-                console.log(`Cancelling ${existingChecks.length} existing check(s)`);
+                console.log(`Cancelling ${existingChecks.length} existing check(s) for PR #${prNumber}`);
                 await cancelChecks(repo, existingChecks);
               }
               
-              // Create new check
+              // context.shaを使用してチェックを作成（Pendingで止まらないようにするため）
               await createCheck(repo, headSha, conclusion, summary);
               
               // Fail the job if approval is missing
