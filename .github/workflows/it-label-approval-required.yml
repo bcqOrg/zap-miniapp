@@ -93,63 +93,72 @@ jobs:
             }
 
       - name: Create check status
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
-            const skip = '${{ steps.check_protection.outputs.skip }}';
-            const status = '${{ steps.check_protection.outputs.status }}';
-            const approvalCount = '${{ steps.check_protection.outputs.approvalCount }}';
-            const approversJson = '${{ steps.check_protection.outputs.approvers }}';
-            const headSha = '${{ steps.check_protection.outputs.headSha }}';
-            
-            // Determine conclusion and summary based on skip flag
-            let conclusion, summary;
-            if (skip === 'true') {
-              conclusion = 'skipped';
-              summary = 'IT label not present. Approval check skipped.';
-            } else {
-              conclusion = status === 'success' ? 'success' : 'failure';
-              const approvers = (() => {
-                try { return JSON.parse(approversJson); }
-                catch (e) { return approversJson ? approversJson.split(', ') : []; }
-              })();
-              summary = status === 'success' 
-                ? `✅ Approval check passed: ${approvalCount} approval(s) found.\nApprovers: ${approvers.join(', ') || 'None'}`
-                : `❌ Approval check failed: At least 1 approval is required for PRs with IT label targeting main.\nCurrent approval count: ${approvalCount}`;
-            }
-            
-            // Create or update check
-            const checkName = 'IT Label Approval Check';
-            const { data: existingChecks } = await github.rest.checks.listForRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: headSha,
-            });
-            
-            const existingCheck = existingChecks.check_runs.find(
-              check => check.name === checkName && check.head_sha === headSha
-            );
-            
-            const checkParams = {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: checkName,
-              head_sha: headSha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: { title: checkName, summary: summary }
-            };
-            
-            if (existingCheck) {
-              await github.rest.checks.update({ ...checkParams, check_run_id: existingCheck.id });
-              console.log(`Updated check: ${checkName}`);
-            } else {
-              await github.rest.checks.create(checkParams);
-              console.log(`Created check: ${checkName}`);
-            }
-            
-            // Fail the job if approval is missing
-            if (status === 'failure') {
-              core.setFailed('At least 1 approval is required for PRs with IT label targeting main.');
+            try {
+              const skip = '${{ steps.check_protection.outputs.skip }}';
+              const status = '${{ steps.check_protection.outputs.status }}';
+              const approvalCount = '${{ steps.check_protection.outputs.approvalCount }}';
+              const approversJson = '${{ steps.check_protection.outputs.approvers }}';
+              const headSha = '${{ steps.check_protection.outputs.headSha }}';
+              
+              console.log(`skip: ${skip}, status: ${status}, headSha: ${headSha}`);
+              
+              // Determine conclusion and summary based on skip flag
+              let conclusion, summary;
+              if (skip === 'true') {
+                conclusion = 'skipped';
+                summary = 'IT label not present. Approval check skipped.';
+              } else {
+                conclusion = status === 'success' ? 'success' : 'failure';
+                const approvers = (() => {
+                  try { return JSON.parse(approversJson); }
+                  catch (e) { return approversJson ? approversJson.split(', ') : []; }
+                })();
+                summary = status === 'success' 
+                  ? `✅ Approval check passed: ${approvalCount} approval(s) found.\nApprovers: ${approvers.join(', ') || 'None'}`
+                  : `❌ Approval check failed: At least 1 approval is required for PRs with IT label targeting main.\nCurrent approval count: ${approvalCount}`;
+              }
+              
+              // Create or update check
+              const checkName = 'IT Label Approval Check';
+              const { data: existingChecks } = await github.rest.checks.listForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: headSha,
+              });
+              
+              const existingCheck = existingChecks.check_runs.find(
+                check => check.name === checkName && check.head_sha === headSha
+              );
+              
+              const checkParams = {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: checkName,
+                head_sha: headSha,
+                status: 'completed',
+                conclusion: conclusion,
+                output: { title: checkName, summary: summary }
+              };
+              
+              if (existingCheck) {
+                await github.rest.checks.update({ ...checkParams, check_run_id: existingCheck.id });
+                console.log(`Updated check: ${checkName}`);
+              } else {
+                await github.rest.checks.create(checkParams);
+                console.log(`Created check: ${checkName}`);
+              }
+              
+              // Fail the job if approval is missing
+              if (status === 'failure') {
+                core.setFailed('At least 1 approval is required for PRs with IT label targeting main.');
+              }
+            } catch (error) {
+              console.error('Error creating check status:', error);
+              core.setFailed(`Failed to create check status: ${error.message}`);
+              throw error;
             }
 
