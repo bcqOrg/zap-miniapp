@@ -87,12 +87,18 @@ jobs:
               console.log(`Has IT label: ${hasITLabel}`);
               console.log(`Head SHA: ${pr.head.sha}`);
               
+              // Use context.sha (the commit SHA that triggered the workflow)
+              // This is the merge commit SHA for PR events, which is what GitHub expects
+              const commitSha = context.sha;
+              console.log(`Context SHA (workflow commit): ${commitSha}`);
+              console.log(`PR head SHA: ${pr.head.sha}`);
+              
               // If no IT label, skip approval check
               if (!hasITLabel) {
                 console.log('IT label not found. Skipping approval check.');
                 core.setOutput('skip', 'true');
                 core.setOutput('status', 'skipped');
-                core.setOutput('headSha', pr.head.sha);
+                core.setOutput('headSha', commitSha);
                 return;
               }
               
@@ -114,7 +120,7 @@ jobs:
               core.setOutput('skip', 'false');
               core.setOutput('approvalCount', approvalCount.toString());
               core.setOutput('approvers', JSON.stringify(approvers));
-              core.setOutput('headSha', pr.head.sha);
+              core.setOutput('headSha', commitSha);
               core.setOutput('status', hasApproval ? 'success' : 'failure');
               
             } catch (error) {
